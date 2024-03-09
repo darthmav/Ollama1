@@ -898,12 +898,6 @@ func CreateBlobHandler(c *gin.Context) {
 	c.Status(http.StatusCreated)
 }
 
-var defaultAllowOrigins = []string{
-	"localhost",
-	"127.0.0.1",
-	"0.0.0.0",
-}
-
 func NewServer() (*Server, error) {
 	workDir, err := os.MkdirTemp("", "ollama")
 	if err != nil {
@@ -915,35 +909,122 @@ func NewServer() (*Server, error) {
 	}, nil
 }
 
-func (s *Server) GenerateRoutes() http.Handler {
-	var origins []string
-	if o := os.Getenv("OLLAMA_ORIGINS"); o != "" {
-		origins = strings.Split(o, ",")
+type Settings struct {
+	Origins []string `json:"OLLAMA_ORIGINS"`
+}
+
+// See: https://github.com/ollama/ollama/blob/main/docs/faq.md#where-are-models-stored
+func getSettingsPath() string {
+	var settingsPath string
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = ""
 	}
+	switch runtime.GOOS {
+	case "darwin", "windows":
+		settingsPath = filepath.Join(homeDir, ".ollama", "settings.json")
+	case "linux":
+		settingsPath = "/usr/share/ollama/.ollama/settings.json"
+	default:
+		settingsPath = filepath.Join(homeDir, ".ollama", "settings.json")
+	}
+	return settingsPath
+}
+
+func ensureSettingsFile() error {
+	settingsPath := getSettingsPath()
+
+	// Check if the file exists
+	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
+		// File does not exist, create directories and file
+		if err := os.MkdirAll(filepath.Dir(settingsPath), 0755); err != nil {
+			return err
+		}
+
+		file, err := os.Create(settingsPath)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		// Define default settings
+		defaultSettings := Settings{
+			Origins: []string{"localhost", "127.0.0.1", "0.0.0.0"},
+		}
+
+		// Marshal the default settings into JSON
+		settingsJSON, err := json.MarshalIndent(defaultSettings, "", "  ")
+		if err != nil {
+			return err
+		}
+
+		// Write the JSON to the file
+		if _, err := file.Write(settingsJSON); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func prependHttpIfMissing(origins []string) []string {
+	var correctedOrigins []string
+	for _, origin := range origins {
+		if !strings.HasPrefix(origin, "http://") && !strings.HasPrefix(origin, "https://") {
+			// Default to http if no scheme is specified
+			correctedOrigin := "http://" + origin
+			correctedOrigins = append(correctedOrigins, correctedOrigin)
+		} else {
+			correctedOrigins = append(correctedOrigins, origin)
+		}
+	}
+	return correctedOrigins
+}
+
+func (s *Server) GenerateRoutes() http.Handler {
+	// Ensure the settings file exists before attempting to read from it
+	if err := ensureSettingsFile(); err != nil {
+		slog.Info("Failed to ensure settings file: %v", err)
+	}
+
+	var origins []string
+	// Attempt to read OLLAMA_ORIGINS from settings file
+	settingsPath := getSettingsPath()
+	if settingsFile, err := os.ReadFile(settingsPath); err == nil {
+		var settings struct {
+			Origins []string `json:"OLLAMA_ORIGINS"`
+		}
+		if err := json.Unmarshal(settingsFile, &settings); err == nil {
+			origins = settings.Origins
+		}
+	}
+
+	// Fallback to environment variable if settings file doesn't specify origins
+	if len(origins) == 0 {
+		if o := os.Getenv("OLLAMA_ORIGINS"); o != "" {
+			origins = strings.Split(o, ",")
+		}
+	}
+
+	origins = prependHttpIfMissing(origins)
 
 	config := cors.DefaultConfig()
 	config.AllowWildcard = true
 	config.AllowBrowserExtensions = true
-
 	config.AllowOrigins = origins
-	for _, allowOrigin := range defaultAllowOrigins {
-		config.AllowOrigins = append(config.AllowOrigins,
-			fmt.Sprintf("http://%s", allowOrigin),
-			fmt.Sprintf("https://%s", allowOrigin),
-			fmt.Sprintf("http://%s:*", allowOrigin),
-			fmt.Sprintf("https://%s:*", allowOrigin),
-		)
-	}
 
 	r := gin.Default()
-	r.Use(
-		cors.New(config),
-		func(c *gin.Context) {
-			c.Set("workDir", s.WorkDir)
-			c.Next()
-		},
-	)
+	r.Use(cors.New(config), func(c *gin.Context) {
+		c.Set("workDir", s.WorkDir)
+		c.Next()
+	})
 
+	defineAPIEndpoints(r)
+
+	return r
+}
+
+func defineAPIEndpoints(r *gin.Engine) {
 	r.POST("/api/pull", PullModelHandler)
 	r.POST("/api/generate", GenerateHandler)
 	r.POST("/api/chat", ChatHandler)
@@ -963,14 +1044,11 @@ func (s *Server) GenerateRoutes() http.Handler {
 		r.Handle(method, "/", func(c *gin.Context) {
 			c.String(http.StatusOK, "Ollama is running")
 		})
-
 		r.Handle(method, "/api/tags", ListModelsHandler)
 		r.Handle(method, "/api/version", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"version": version.Version})
 		})
 	}
-
-	return r
 }
 
 func Serve(ln net.Listener) error {

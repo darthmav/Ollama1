@@ -1,14 +1,23 @@
 import { spawn, ChildProcess } from 'child_process'
-import { app, autoUpdater, dialog, Tray, Menu, BrowserWindow, MenuItemConstructorOptions, nativeTheme } from 'electron'
+import {
+  app,
+  autoUpdater,
+  dialog,
+  Tray,
+  Menu,
+  BrowserWindow,
+  MenuItemConstructorOptions,
+  nativeTheme,
+  shell,
+} from 'electron'
 import Store from 'electron-store'
 import winston from 'winston'
 import 'winston-daily-rotate-file'
 import * as path from 'path'
+import * as os from 'os'
 
 import { v4 as uuidv4 } from 'uuid'
 import { installed } from './install'
-
-require('@electron/remote/main').initialize()
 
 if (require('electron-squirrel-startup')) {
   app.quit()
@@ -16,7 +25,7 @@ if (require('electron-squirrel-startup')) {
 
 const store = new Store()
 
-let welcomeWindow: BrowserWindow | null = null
+const preload = path.join(__dirname, './preload.ts')
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string
 
@@ -58,7 +67,8 @@ app.on('ready', () => {
 })
 
 function firstRunWindow() {
-  // Create the browser window.
+  let welcomeWindow: BrowserWindow | null = null
+
   welcomeWindow = new BrowserWindow({
     width: 400,
     height: 500,
@@ -68,12 +78,11 @@ function firstRunWindow() {
     movable: true,
     show: false,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      preload,
+      nodeIntegration: false,
+      contextIsolation: true,
     },
   })
-
-  require('@electron/remote/main').enable(welcomeWindow.webContents)
 
   welcomeWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY)
   welcomeWindow.on('ready-to-show', () => welcomeWindow.show())
@@ -116,6 +125,31 @@ function updateTray() {
 
   const menu = Menu.buildFromTemplate([
     ...(updateAvailable ? updateItems : []),
+    {
+      label: 'Settings',
+      // See: https://github.com/ollama/ollama/blob/main/docs/faq.md#where-are-models-stored
+      click: () => {
+        let settingsPath
+        switch (os.platform()) {
+          case 'darwin': // macOS
+            settingsPath = path.join(os.homedir(), '.ollama', 'settings.json')
+            break
+          case 'win32': // Windows
+            settingsPath = path.join(os.homedir(), '.ollama', 'settings.json')
+            break
+          case 'linux': // Linux
+            settingsPath = path.join('/usr', 'share', 'ollama', '.ollama', 'settings.json')
+            break
+          default:
+            // Default to home directory if OS is not recognized
+            settingsPath = path.join(os.homedir(), '.ollama', 'settings.json')
+            break
+        }
+        shell.openPath(settingsPath)
+      },
+      accelerator: 'Command+,',
+    },
+    { type: 'separator' },
     { role: 'quit', label: 'Quit Ollama', accelerator: 'Command+Q' },
   ])
 
