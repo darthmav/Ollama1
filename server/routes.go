@@ -948,6 +948,7 @@ func (s *Server) GenerateRoutes() http.Handler {
 	config := cors.DefaultConfig()
 	config.AllowWildcard = true
 	config.AllowBrowserExtensions = true
+	config.AllowHeaders = []string{"*"}
 
 	if allowedOrigins := strings.Trim(os.Getenv("OLLAMA_ORIGINS"), "\"'"); allowedOrigins != "" {
 		config.AllowOrigins = strings.Split(allowedOrigins, ",")
