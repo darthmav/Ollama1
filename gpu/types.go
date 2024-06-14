@@ -44,7 +44,9 @@ type CPUInfo struct {
 
 type CudaGPUInfo struct {
 	GpuInfo
-	index int //nolint:unused,nolintlint
+	index        int //nolint:unused,nolintlint
+	computeMajor int //nolint:unused,nolintlint
+	computeMinor int //nolint:unused,nolintlint
 }
 type CudaGPUInfoList []CudaGPUInfo
 
