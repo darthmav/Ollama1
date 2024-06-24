@@ -18,6 +18,7 @@ ENV PATH /opt/rh/devtoolset-10/root/usr/bin:$PATH
 COPY --from=llm-code / /go/src/github.com/ollama/ollama/
 WORKDIR /go/src/github.com/ollama/ollama/llm/generate
 ARG CGO_CFLAGS
+ENV GOARCH amd64
 RUN OLLAMA_SKIP_STATIC_GENERATE=1 OLLAMA_SKIP_CPU_GENERATE=1 sh gen_linux.sh
 
 FROM --platform=linux/arm64 nvidia/cuda:$CUDA_VERSION-devel-rockylinux8 AS cuda-build-arm64
@@ -28,6 +29,7 @@ ENV PATH /opt/rh/gcc-toolset-10/root/usr/bin:$PATH
 COPY --from=llm-code / /go/src/github.com/ollama/ollama/
 WORKDIR /go/src/github.com/ollama/ollama/llm/generate
 ARG CGO_CFLAGS
+ENV GOARCH arm64
 RUN OLLAMA_SKIP_STATIC_GENERATE=1 OLLAMA_SKIP_CPU_GENERATE=1 sh gen_linux.sh
 
 FROM --platform=linux/amd64 rocm/dev-centos-7:${ROCM_VERSION}-complete AS rocm-build-amd64
@@ -37,6 +39,7 @@ RUN CMAKE_VERSION=${CMAKE_VERSION} sh /rh_linux_deps.sh
 ENV PATH /opt/rh/devtoolset-10/root/usr/bin:$PATH
 ENV LIBRARY_PATH /opt/amdgpu/lib64
 COPY --from=llm-code / /go/src/github.com/ollama/ollama/
+ENV GOARCH amd64
 WORKDIR /go/src/github.com/ollama/ollama/llm/generate
 ARG CGO_CFLAGS
 ARG AMDGPU_TARGETS
@@ -49,6 +52,31 @@ RUN mkdir /tmp/scratch && \
     mkdir -p /go/src/github.com/ollama/ollama/dist/deps/ && \
     (cd /tmp/scratch/ && tar czvf /go/src/github.com/ollama/ollama/dist/deps/ollama-linux-amd64-rocm.tgz . )
 
+# To create a local image for building linux binaries on mac
+# docker build --platform linux/amd64 -t builder -f Dockerfile --target unified-builder-amd64 .
+# docker run --platform linux/amd64 --rm -it -v $(pwd):/go/src/github.com/ollama/ollama/ builder
+FROM --platform=linux/amd64 rocm/dev-centos-7:${ROCM_VERSION}-complete as unified-builder-amd64
+ARG CMAKE_VERSION
+ARG GOLANG_VERSION
+ARG CUDA_VERSION
+COPY ./scripts/rh_linux_deps.sh /
+RUN CMAKE_VERSION=${CMAKE_VERSION} GOLANG_VERSION=${GOLANG_VERSION} sh /rh_linux_deps.sh
+RUN yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-rhel7.repo && \
+    dnf clean all && \
+    dnf install -y \
+    zsh \
+    cuda-$(echo ${CUDA_VERSION} | cut -f1-2 -d. | sed -e "s/\./-/g") && \
+    ln -s /usr/local/cuda-* /usr/local/cuda
+# TODO intel oneapi goes here...
+ENV PATH /opt/rh/devtoolset-10/root/usr/bin:$PATH:/usr/local/cuda/bin
+ENV LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/cuda/lib64
+ENV GOARCH amd64
+WORKDIR /go/src/github.com/ollama/ollama/
+ENTRYPOINT [ "zsh" ]
+
+FROM --platform=linux/amd64 unified-builder-amd64 as new-runners-amd64
+COPY . .
+RUN make -C llama -j 10
 
 FROM --platform=linux/amd64 centos:7 AS cpu-builder-amd64
 ARG CMAKE_VERSION
@@ -56,6 +84,7 @@ ARG GOLANG_VERSION
 COPY ./scripts/rh_linux_deps.sh /
 RUN CMAKE_VERSION=${CMAKE_VERSION} GOLANG_VERSION=${GOLANG_VERSION} sh /rh_linux_deps.sh
 ENV PATH /opt/rh/devtoolset-10/root/usr/bin:$PATH
+ENV GOARCH amd64
 COPY --from=llm-code / /go/src/github.com/ollama/ollama/
 ARG OLLAMA_CUSTOM_CPU_DEFS
 ARG CGO_CFLAGS
@@ -79,6 +108,7 @@ ENV PATH /opt/rh/devtoolset-10/root/usr/bin:$PATH
 COPY --from=llm-code / /go/src/github.com/ollama/ollama/
 ARG OLLAMA_CUSTOM_CPU_DEFS
 ARG CGO_CFLAGS
+ENV GOARCH arm64
 WORKDIR /go/src/github.com/ollama/ollama/llm/generate
 
 FROM --platform=linux/arm64 cpu-builder-arm64 AS static-build-arm64
@@ -92,12 +122,17 @@ FROM --platform=linux/amd64 cpu-build-amd64 AS build-amd64
 ENV CGO_ENABLED 1
 WORKDIR /go/src/github.com/ollama/ollama
 COPY . .
+COPY --from=new-runners-amd64 /go/src/github.com/ollama/ollama/dist/ ./dist/
+COPY --from=new-runners-amd64 /go/src/github.com/ollama/ollama/llm/build/linux/ llm/build/linux/
 COPY --from=static-build-amd64 /go/src/github.com/ollama/ollama/llm/build/linux/ llm/build/linux/
 COPY --from=cpu_avx-build-amd64 /go/src/github.com/ollama/ollama/llm/build/linux/ llm/build/linux/
+COPY --from=cpu_avx-build-amd64 /go/src/github.com/ollama/ollama/dist/ ./dist/
 COPY --from=cpu_avx2-build-amd64 /go/src/github.com/ollama/ollama/llm/build/linux/ llm/build/linux/
+COPY --from=cpu_avx2-build-amd64 /go/src/github.com/ollama/ollama/dist/ ./dist/
 COPY --from=cuda-build-amd64 /go/src/github.com/ollama/ollama/llm/build/linux/ llm/build/linux/
+COPY --from=cuda-build-amd64 /go/src/github.com/ollama/ollama/dist/ ./dist/
 COPY --from=rocm-build-amd64 /go/src/github.com/ollama/ollama/llm/build/linux/ llm/build/linux/
-COPY --from=rocm-build-amd64 /go/src/github.com/ollama/ollama/dist/deps/ ./dist/deps/
+COPY --from=rocm-build-amd64 /go/src/github.com/ollama/ollama/dist/ ./dist/
 ARG GOFLAGS
 ARG CGO_CFLAGS
 RUN go build -trimpath .
