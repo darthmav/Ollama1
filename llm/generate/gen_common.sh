@@ -27,6 +27,7 @@ init_vars() {
         WHOLE_ARCHIVE="-Wl,-force_load"
         NO_WHOLE_ARCHIVE=""
         GCC_ARCH="-arch ${ARCH}"
+        OS=darwin
         ;;
     "Linux")
         LIB_EXT="so"
@@ -35,6 +36,7 @@ init_vars() {
 
         # Cross compiling not supported on linux - Use docker
         GCC_ARCH=""
+        OS=linux
         ;;
     *)
         ;;
@@ -42,6 +44,8 @@ init_vars() {
     if [ -z "${CMAKE_CUDA_ARCHITECTURES}" ] ; then
         CMAKE_CUDA_ARCHITECTURES="50;52;61;70;75;80"
     fi
+    DIST_BASE=../../dist/${OS}-${GOARCH}
+    RUNNER_BASE=${DIST_BASE}/ollama_runners
 }
 
 git_module_setup() {
@@ -81,6 +85,18 @@ apply_patches() {
 build() {
     cmake -S ${LLAMACPP_DIR} -B ${BUILD_DIR} ${CMAKE_DEFS}
     cmake --build ${BUILD_DIR} ${CMAKE_TARGETS} -j8
+}
+
+install() {
+    echo "Installing binaries to dist dir ${DIST_DIR}"
+    mkdir -p ${DIST_DIR}
+    for f in ${BUILD_DIR}/bin/* ; do
+        # Skip over any compressed files
+        if [[ $f == *.gz ]] ; then
+            continue
+        fi
+        cp ${f} ${DIST_DIR}/
+    done
 }
 
 compress() {
