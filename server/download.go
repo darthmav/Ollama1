@@ -26,6 +26,7 @@ import (
 )
 
 const maxRetries = 6
+const downloadTimeout = 5
 
 var errMaxRetriesExceeded = errors.New("max retries exceeded")
 var errPartStalled = errors.New("part stalled")
@@ -222,7 +223,7 @@ func (b *blobDownload) downloadChunk(ctx context.Context, requestURL *url.URL, w
 		defer resp.Body.Close()
 
 		n, err := io.CopyN(w, io.TeeReader(resp.Body, part), part.Size-part.Completed)
-		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 			// rollback progress
 			b.Completed.Add(-n)
 			return err
@@ -246,7 +247,7 @@ func (b *blobDownload) downloadChunk(ctx context.Context, requestURL *url.URL, w
 					return nil
 				}
 
-				if !part.lastUpdated.IsZero() && time.Since(part.lastUpdated) > 5*time.Second {
+				if !part.lastUpdated.IsZero() && time.Since(part.lastUpdated) > downloadTimeout*time.Second {
 					const msg = "%s part %d stalled; retrying. If this persists, press ctrl-c to exit, then 'ollama pull' to find a faster connection."
 					slog.Info(fmt.Sprintf(msg, b.Digest[7:19], part.N))
 					// reset last updated
