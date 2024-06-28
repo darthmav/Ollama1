@@ -74,9 +74,12 @@ jobs:
           $env:PATH="$gopath;$gccpath;$env:PATH"
           echo $env:PATH
           go generate -x ./...
+          make -C llama -j 8
         if: ${{ startsWith(matrix.os, 'windows-') }}
         name: 'Windows Go Generate'
-      - run: go generate -x ./...
+      - run: |
+          go generate -x ./...
+          make -C llama -j 8
         if: ${{ ! startsWith(matrix.os, 'windows-') }}
         name: 'Unix Go Generate'
       - uses: actions/upload-artifact@v4
@@ -110,6 +113,7 @@ jobs:
       - run: |
           git config --global --add safe.directory /__w/ollama/ollama
           go generate -x ./...
+          make -C llama -j 8
         env:
           OLLAMA_SKIP_CPU_GENERATE: '1'
       - uses: actions/upload-artifact@v4
@@ -143,6 +147,7 @@ jobs:
       - run: |
           git config --global --add safe.directory /__w/ollama/ollama
           go generate -x ./...
+          make -C llama -j 8
         env:
           OLLAMA_SKIP_CPU_GENERATE: '1'
       - uses: actions/upload-artifact@v4
@@ -184,6 +189,7 @@ jobs:
           $env:OLLAMA_SKIP_CPU_GENERATE="1"
           $env:HIP_PATH=$(Resolve-Path 'C:\Program Files\AMD\ROCm\*\bin\clang.exe' | split-path | split-path)
           go generate -x ./...
+          make -C llama -j 8
         name: go generate
         env:
           OLLAMA_SKIP_CPU_GENERATE: '1'
@@ -227,6 +233,7 @@ jobs:
           $env:PATH="$gopath;$cudabin;$env:PATH"
           $env:OLLAMA_SKIP_CPU_GENERATE="1"
           go generate -x ./...
+          make -C llama -j 8
         env:
           OLLAMA_SKIP_CPU_GENERATE: '1'
       # TODO - do we need any artifacts?
