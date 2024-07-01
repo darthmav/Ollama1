@@ -7,7 +7,6 @@ export GOFLAGS="'-ldflags=-w -s \"-X=github.com/ollama/ollama/version.Version=$V
 
 BUILD_ARCH=${BUILD_ARCH:-"amd64 arm64"}
 export AMDGPU_TARGETS=${AMDGPU_TARGETS:=""}
-mkdir -p dist
 
 for TARGETARCH in ${BUILD_ARCH}; do
     docker build \
@@ -20,11 +19,13 @@ for TARGETARCH in ${BUILD_ARCH}; do
         -f Dockerfile \
         -t builder:$TARGETARCH \
         .
+    mkdir -p dist
     docker create --platform linux/$TARGETARCH --name builder-$TARGETARCH builder:$TARGETARCH
     docker cp builder-$TARGETARCH:/go/src/github.com/ollama/ollama/ollama ./dist/ollama-linux-$TARGETARCH
 
     if [ "$TARGETARCH" = "amd64" ]; then
         docker cp builder-$TARGETARCH:/go/src/github.com/ollama/ollama/dist/deps/ ./dist/
+        docker cp builder-$TARGETARCH:/go/src/github.com/ollama/ollama/dist/linux-amd64/ ./dist/
     fi
 
     docker rm builder-$TARGETARCH

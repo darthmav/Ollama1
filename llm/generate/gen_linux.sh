@@ -64,7 +64,7 @@ if [ -z "${OLLAMA_SKIP_STATIC_GENERATE}" -o "${OLLAMA_CPU_TARGET}" = "static" ];
     # Static build for linking into the Go binary
     init_vars
     CMAKE_TARGETS="--target llama --target ggml"
-    CMAKE_DEFS="-DBUILD_SHARED_LIBS=off -DLLAMA_NATIVE=off -DLLAMA_AVX=off -DLLAMA_AVX2=off -DLLAMA_AVX512=off -DLLAMA_FMA=off -DLLAMA_F16C=off ${CMAKE_DEFS}"
+    CMAKE_DEFS="-DBUILD_SHARED_LIBS=off -DLLAMA_NATIVE=off -DLLAMA_AVX=off -DLLAMA_AVX2=off -DLLAMA_AVX512=off -DLLAMA_FMA=off -DLLAMA_F16C=off -DLLAMA_OPENMP=off ${CMAKE_DEFS}"
     BUILD_DIR="../build/linux/${ARCH}_static"
     echo "Building static library"
     build
@@ -79,8 +79,10 @@ if [ -z "${OLLAMA_SKIP_CPU_GENERATE}" ]; then
         echo "OLLAMA_CUSTOM_CPU_DEFS=\"${OLLAMA_CUSTOM_CPU_DEFS}\""
         CMAKE_DEFS="${OLLAMA_CUSTOM_CPU_DEFS} -DCMAKE_POSITION_INDEPENDENT_CODE=on ${CMAKE_DEFS}"
         BUILD_DIR="../build/linux/${ARCH}/cpu"
+        DIST_DIR=${RUNNER_BASE}/cpu
         echo "Building custom CPU"
         build
+        install
         compress
     else
         # Darwin Rosetta x86 emulation does NOT support AVX, AVX2, AVX512
@@ -101,8 +103,10 @@ if [ -z "${OLLAMA_SKIP_CPU_GENERATE}" ]; then
             init_vars
             CMAKE_DEFS="${COMMON_CPU_DEFS} -DLLAMA_AVX=off -DLLAMA_AVX2=off -DLLAMA_AVX512=off -DLLAMA_FMA=off -DLLAMA_F16C=off ${CMAKE_DEFS}"
             BUILD_DIR="../build/linux/${ARCH}/cpu"
+            DIST_DIR=${RUNNER_BASE}/cpu
             echo "Building LCD CPU"
             build
+            install
             compress
         fi
 
@@ -118,8 +122,10 @@ if [ -z "${OLLAMA_SKIP_CPU_GENERATE}" ]; then
                 init_vars
                 CMAKE_DEFS="${COMMON_CPU_DEFS} -DLLAMA_AVX=on -DLLAMA_AVX2=off -DLLAMA_AVX512=off -DLLAMA_FMA=off -DLLAMA_F16C=off ${CMAKE_DEFS}"
                 BUILD_DIR="../build/linux/${ARCH}/cpu_avx"
+                DIST_DIR=${RUNNER_BASE}/cpu_avx
                 echo "Building AVX CPU"
                 build
+                install
                 compress
             fi
 
@@ -131,8 +137,10 @@ if [ -z "${OLLAMA_SKIP_CPU_GENERATE}" ]; then
                 init_vars
                 CMAKE_DEFS="${COMMON_CPU_DEFS} -DLLAMA_AVX=on -DLLAMA_AVX2=on -DLLAMA_AVX512=off -DLLAMA_FMA=on -DLLAMA_F16C=on ${CMAKE_DEFS}"
                 BUILD_DIR="../build/linux/${ARCH}/cpu_avx2"
+                DIST_DIR=${RUNNER_BASE}/cpu_avx2
                 echo "Building AVX2 CPU"
                 build
+                install
                 compress
             fi
         fi
@@ -159,9 +167,9 @@ fi
 if [ -z "${OLLAMA_SKIP_CUDA_GENERATE}" -a -d "${CUDA_LIB_DIR}" ]; then
     echo "CUDA libraries detected - building dynamic CUDA library"
     init_vars
-    CUDA_MAJOR=$(ls "${CUDA_LIB_DIR}"/libcudart.so.* | head -1 | cut -f3 -d. || true)
-    if [ -n "${CUDA_MAJOR}" ]; then
-        CUDA_VARIANT=_v${CUDA_MAJOR}
+    CUDA_VERSION=$(nvcc --version | grep " release " | sed -e 's/^.* release \(.*\),.*$/\1/g' || true)
+    if [ -n "${CUDA_VERSION}" ]; then
+        CUDA_VARIANT=_v${CUDA_VERSION}
     fi
     if [ "${ARCH}" == "arm64" ]; then
         echo "ARM CPU detected - disabling unsupported AVX instructions"
@@ -182,6 +190,10 @@ if [ -z "${OLLAMA_SKIP_CUDA_GENERATE}" -a -d "${CUDA_LIB_DIR}" ]; then
     fi
     CMAKE_DEFS="${COMMON_CMAKE_DEFS} ${CMAKE_DEFS} ${ARM64_DEFS} ${CMAKE_CUDA_DEFS}"
     BUILD_DIR="../build/linux/${ARCH}/cuda${CUDA_VARIANT}"
+    DIST_DIR=${RUNNER_BASE}/cuda${CUDA_VARIANT}
+    # Temporarily cary cuda libs with the runner
+    # DEPS_DIR=${DIST_BASE}/cuda
+    DEPS_DIR=${BUILD_DIR}/bin
     EXTRA_LIBS="-L${CUDA_LIB_DIR} -lcudart -lcublas -lcublasLt -lcuda"
     build
 
@@ -190,18 +202,20 @@ if [ -z "${OLLAMA_SKIP_CUDA_GENERATE}" -a -d "${CUDA_LIB_DIR}" ]; then
     # TODO - in the future we may shift to packaging these separately and conditionally
     #        downloading them in the install script.
     DEPS="$(ldd ${BUILD_DIR}/bin/ollama_llama_server )"
+    mkdir -p ${DEPS_DIR}
     for lib in libcudart.so libcublas.so libcublasLt.so ; do
         DEP=$(echo "${DEPS}" | grep ${lib} | cut -f1 -d' ' | xargs || true)
         if [ -n "${DEP}" -a -e "${CUDA_LIB_DIR}/${DEP}" ]; then
-            cp "${CUDA_LIB_DIR}/${DEP}" "${BUILD_DIR}/bin/"
+            cp "${CUDA_LIB_DIR}/${DEP}" "${DEPS_DIR}/"
         elif [ -e "${CUDA_LIB_DIR}/${lib}.${CUDA_MAJOR}" ]; then
-            cp "${CUDA_LIB_DIR}/${lib}.${CUDA_MAJOR}" "${BUILD_DIR}/bin/"
+            cp "${CUDA_LIB_DIR}/${lib}.${CUDA_MAJOR}" "${DEPS_DIR}/"
         elif [ -e "${CUDART_LIB_DIR}/${lib}" ]; then
-            cp -d ${CUDART_LIB_DIR}/${lib}* "${BUILD_DIR}/bin/"
+            cp -d ${CUDART_LIB_DIR}/${lib}* "${DEPS_DIR}/"
         else
-            cp -d "${CUDA_LIB_DIR}/${lib}*" "${BUILD_DIR}/bin/"
+            cp -d "${CUDA_LIB_DIR}/${lib}*" "${DEPS_DIR}/"
         fi
     done
+    install
     compress
 
 fi
@@ -218,7 +232,9 @@ if [ -z "${OLLAMA_SKIP_ONEAPI_GENERATE}" -a -d "${ONEAPI_ROOT}" ]; then
     CC=icx
     CMAKE_DEFS="${COMMON_CMAKE_DEFS} ${CMAKE_DEFS} -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx -DLLAMA_SYCL=ON -DLLAMA_SYCL_F16=OFF"
     BUILD_DIR="../build/linux/${ARCH}/oneapi"
-    EXTRA_LIBS="-fsycl -Wl,-rpath,${ONEAPI_ROOT}/compiler/latest/lib,-rpath,${ONEAPI_ROOT}/mkl/latest/lib,-rpath,${ONEAPI_ROOT}/tbb/latest/lib,-rpath,${ONEAPI_ROOT}/compiler/latest/opt/oclfpga/linux64/lib -lOpenCL -lmkl_core -lmkl_sycl_blas -lmkl_intel_ilp64 -lmkl_tbb_thread -ltbb"
+    DIST_DIR=${RUNNER_BASE}/oneapi
+    DEPS_DIR=${DIST_BASE}/oneapi
+    EXTRA_LIBS="-fsycl -Wl,-rpath,\$ORIGIN/../../oneapi/ -lOpenCL -lmkl_core -lmkl_sycl_blas -lmkl_intel_ilp64 -lmkl_tbb_thread -ltbb"
     DEBUG_FLAGS="" # icx compiles with -O0 if we pass -g, so we must remove it
     build
 
@@ -226,13 +242,15 @@ if [ -z "${OLLAMA_SKIP_ONEAPI_GENERATE}" -a -d "${ONEAPI_ROOT}" ]; then
     for dep in $(ldd "${BUILD_DIR}/bin/ollama_llama_server" | grep "=>" | cut -f2 -d= | cut -f2 -d' ' | grep -e sycl -e mkl -e tbb); do
         cp "${dep}" "${BUILD_DIR}/bin/"
     done
-    cp "${ONEAPI_ROOT}/compiler/latest/lib/libOpenCL.so" "${BUILD_DIR}/bin/"
-    cp "${ONEAPI_ROOT}/compiler/latest/lib/libimf.so" "${BUILD_DIR}/bin/"
-    cp "${ONEAPI_ROOT}/compiler/latest/lib/libintlc.so.5" "${BUILD_DIR}/bin/"
-    cp "${ONEAPI_ROOT}/compiler/latest/lib/libirng.so" "${BUILD_DIR}/bin/"
-    cp "${ONEAPI_ROOT}/compiler/latest/lib/libpi_level_zero.so" "${BUILD_DIR}/bin/"
-    cp "${ONEAPI_ROOT}/compiler/latest/lib/libsvml.so" "${BUILD_DIR}/bin/"
-    cp "${ONEAPI_ROOT}/compiler/latest/lib/libur_loader.so.0" "${BUILD_DIR}/bin/"
+    mkdir -p ${DEPS_DIR}
+    cp "${ONEAPI_ROOT}/compiler/latest/lib/libOpenCL.so" "${DEPS_DIR}/"
+    cp "${ONEAPI_ROOT}/compiler/latest/lib/libimf.so" "${DEPS_DIR}/"
+    cp "${ONEAPI_ROOT}/compiler/latest/lib/libintlc.so.5" "${DEPS_DIR}/"
+    cp "${ONEAPI_ROOT}/compiler/latest/lib/libirng.so" "${DEPS_DIR}/"
+    cp "${ONEAPI_ROOT}/compiler/latest/lib/libpi_level_zero.so" "${DEPS_DIR}/"
+    cp "${ONEAPI_ROOT}/compiler/latest/lib/libsvml.so" "${DEPS_DIR}/"
+    cp "${ONEAPI_ROOT}/compiler/latest/lib/libur_loader.so.0" "${DEPS_DIR}/"
+    install
     compress
 fi
 
@@ -250,8 +268,9 @@ fi
 
 if [ -z "${OLLAMA_SKIP_ROCM_GENERATE}" -a -d "${ROCM_PATH}" ]; then
     echo "ROCm libraries detected - building dynamic ROCm library"
-    if [ -f ${ROCM_PATH}/lib/librocblas.so.*.*.????? ]; then
-        ROCM_VARIANT=_v$(ls ${ROCM_PATH}/lib/librocblas.so.*.*.????? | cut -f5 -d. || true)
+    ROCM_VERSION=$(hipcc --version | grep "HIP version:" | cut -f2- -d: | xargs | cut -f1,2 -d. || true)
+    if [ -n "${ROCM_VERSION}" ]; then
+        ROCM_VARIANT=_v${ROCM_VERSION}
     fi
     init_vars
     CMAKE_DEFS="${COMMON_CMAKE_DEFS} ${CMAKE_DEFS} -DLLAMA_HIPBLAS=on -DCMAKE_C_COMPILER=$ROCM_PATH/llvm/bin/clang -DCMAKE_CXX_COMPILER=$ROCM_PATH/llvm/bin/clang++ -DAMDGPU_TARGETS=$(amdGPUs) -DGPU_TARGETS=$(amdGPUs)"
@@ -262,7 +281,9 @@ if [ -z "${OLLAMA_SKIP_ROCM_GENERATE}" -a -d "${ROCM_PATH}" ]; then
         echo "Building custom ROCM GPU"
     fi
     BUILD_DIR="../build/linux/${ARCH}/rocm${ROCM_VARIANT}"
-    EXTRA_LIBS="-L${ROCM_PATH}/lib -L/opt/amdgpu/lib/x86_64-linux-gnu/ -Wl,-rpath,\$ORIGIN/../../rocm/ -lhipblas -lrocblas -lamdhip64 -lrocsolver -lamd_comgr -lhsa-runtime64 -lrocsparse -ldrm -ldrm_amdgpu"
+    DIST_DIR=${RUNNER_BASE}/rocm${ROCM_VARIANT}
+    DEPS_DIR=${DIST_BASE}/rocm
+    EXTRA_LIBS="-L${ROCM_PATH}/lib -L/opt/amdgpu/lib/x86_64-linux-gnu/ -Wl,-rpath,\$ORIGIN/../../rocm${ROCM_VARIANT}/ -lhipblas -lrocblas -lamdhip64 -lrocsolver -lamd_comgr -lhsa-runtime64 -lrocsparse -ldrm -ldrm_amdgpu"
     build
 
     # Record the ROCM dependencies
@@ -277,6 +298,7 @@ if [ -z "${OLLAMA_SKIP_ROCM_GENERATE}" -a -d "${ROCM_PATH}" ]; then
         echo "ERROR: deps file short"
         exit 1
     fi
+    install
     compress
 fi
 

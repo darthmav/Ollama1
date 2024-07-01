@@ -15,6 +15,7 @@ function checkEnv() {
         $MSVC_INSTALL=(Get-CimInstance MSFT_VSInstance -Namespace root/cimv2/vs)[0].InstallLocation
         $env:VCToolsRedistDir=(get-item "${MSVC_INSTALL}\VC\Redist\MSVC\*")[0]
     }
+    get-command make
     # Try to find the CUDA dir
     if ($null -eq $env:NVIDIA_DIR) {
         $d=(get-command -ea 'silentlycontinue' nvcc).path
@@ -72,6 +73,7 @@ function buildOllama() {
     write-host "Building ollama CLI"
     if ($null -eq ${env:OLLAMA_SKIP_GENERATE}) {
         & go generate ./...
+        & make -C llama -j 12
         if ($LASTEXITCODE -ne 0) { exit($LASTEXITCODE)}    
     } else {
         write-host "Skipping generate step with OLLAMA_SKIP_GENERATE set"
