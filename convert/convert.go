@@ -5,9 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
-	"os"
-	"path/filepath"
 
 	"github.com/ollama/ollama/llm"
 )
@@ -63,8 +62,8 @@ type Converter interface {
 	writeFile(io.WriteSeeker, llm.KV, []*llm.Tensor) error
 }
 
-func Convert(d string, ws io.WriteSeeker) error {
-	f, err := os.Open(filepath.Join(d, "config.json"))
+func Convert(fsys fs.FS, ws io.WriteSeeker) error {
+	f, err := fsys.Open("config.json")
 	if err != nil {
 		return err
 	}
@@ -91,7 +90,7 @@ func Convert(d string, ws io.WriteSeeker) error {
 		return errors.New("unsupported architecture")
 	}
 
-	bts, err := os.ReadFile(filepath.Join(d, "config.json"))
+	bts, err := fs.ReadFile(fsys, "config.json")
 	if err != nil {
 		return err
 	}
@@ -100,7 +99,7 @@ func Convert(d string, ws io.WriteSeeker) error {
 		return err
 	}
 
-	t, err := parseTokenizer(d, c.specialTypes())
+	t, err := parseTokenizer(fsys, c.specialTypes())
 	if err != nil {
 		return err
 	}
@@ -114,7 +113,7 @@ func Convert(d string, ws io.WriteSeeker) error {
 		}
 	}
 
-	ts, err := parseTensors(d)
+	ts, err := parseTensors(fsys)
 	if err != nil {
 		return err
 	}

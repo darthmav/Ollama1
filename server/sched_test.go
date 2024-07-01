@@ -126,7 +126,7 @@ func newScenario(t *testing.T, ctx context.Context, modelName string, estimatedV
 		"tokenizer.ggml.scores":         []float32{0},
 		"tokenizer.ggml.token_type":     []int32{0},
 	}, []*llm.Tensor{
-		&llm.Tensor{Name: "blk.0.attn.weight", Kind: uint32(0), Offset: uint64(0), Shape: []uint64{1, 1, 1, 1}, WriterTo: &bytes.Reader{}},
+		{Name: "blk.0.attn.weight", Kind: uint32(0), Offset: uint64(0), Shape: []uint64{1, 1, 1, 1}, WriterTo: &bytes.Reader{}},
 	}))
 
 	fname := f.Name()

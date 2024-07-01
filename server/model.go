@@ -92,36 +92,6 @@ func parseFromZipFile(_ context.Context, file *os.File, digest string, fn func(a
 	}
 	defer os.RemoveAll(tempdir)
 
-	fn(api.ProgressResponse{Status: "unpacking model metadata"})
-	for _, f := range r.File {
-		// TODO(mxyng): this should not write out all files to disk
-		outfile, err := os.Create(filepath.Join(tempdir, f.Name))
-		if err != nil {
-			return nil, err
-		}
-		defer outfile.Close()
-
-		infile, err := f.Open()
-		if err != nil {
-			return nil, err
-		}
-		defer infile.Close()
-
-		if _, err = io.Copy(outfile, infile); err != nil {
-			return nil, err
-		}
-
-		if err := outfile.Close(); err != nil {
-			return nil, err
-		}
-
-		if err := infile.Close(); err != nil {
-			return nil, err
-		}
-	}
-
-	fn(api.ProgressResponse{Status: "converting model"})
-
 	// TODO(mxyng): this should write directly into a layer
 	// e.g. NewLayer(arch.Reader(), "application/vnd.ollama.image.model")
 	temp, err := os.CreateTemp(tempdir, "fp16")
@@ -131,7 +101,8 @@ func parseFromZipFile(_ context.Context, file *os.File, digest string, fn func(a
 	defer temp.Close()
 	defer os.Remove(temp.Name())
 
-	if err := convert.Convert(tempdir, temp); err != nil {
+	fn(api.ProgressResponse{Status: "converting model"})
+	if err := convert.Convert(convert.TempZipFS(r, tempdir), temp); err != nil {
 		return nil, err
 	}
 
