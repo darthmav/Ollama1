@@ -389,11 +389,6 @@ func (s *Server) PullModelHandler(c *gin.Context) {
 		return
 	}
 
-	if err := checkNameExists(name); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
 	ch := make(chan any)
 	go func() {
 		defer close(ch)
@@ -477,7 +472,7 @@ func checkNameExists(name model.Name) error {
 	}
 
 	for n := range names {
-		if strings.EqualFold(n.Filepath(), name.Filepath()) && n != name {
+		if strings.EqualFold(n.Filepath(), name.Filepath()) {
 			return fmt.Errorf("a model with that name already exists")
 		}
 	}
@@ -498,11 +493,6 @@ func (s *Server) CreateModelHandler(c *gin.Context) {
 	name := model.ParseName(cmp.Or(r.Model, r.Name))
 	if !name.IsValid() {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": errtypes.InvalidModelNameErrMsg})
-		return
-	}
-
-	if err := checkNameExists(name); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
