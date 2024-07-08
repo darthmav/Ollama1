@@ -1173,21 +1173,6 @@ func versionHandler(cmd *cobra.Command, _ []string) {
 	}
 }
 
-func appendEnvDocs(cmd *cobra.Command, envs []envconfig.EnvVar) {
-	if len(envs) == 0 {
-		return
-	}
-
-	envUsage := `
-Environment Variables:
-`
-	for _, e := range envs {
-		envUsage += fmt.Sprintf("      %-24s   %s\n", e.Name, e.Description)
-	}
-
-	cmd.SetUsageTemplate(cmd.UsageTemplate() + envUsage)
-}
-
 func NewCLI() *cobra.Command {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	cobra.EnableCommandSorting = false
@@ -1217,22 +1202,24 @@ func NewCLI() *cobra.Command {
 	rootCmd.Flags().BoolP("version", "v", false, "Show version information")
 
 	createCmd := &cobra.Command{
-		Use:     "create MODEL",
-		Short:   "Create a model from a Modelfile",
-		Args:    cobra.ExactArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    CreateHandler,
+		Use:         "create MODEL",
+		Short:       "Create a model from a Modelfile",
+		Args:        cobra.ExactArgs(1),
+		PreRunE:     checkServerHeartbeat,
+		RunE:        CreateHandler,
+		Annotations: envconfig.Describe("OLLAMA_HOST"),
 	}
 
 	createCmd.Flags().StringP("file", "f", "Modelfile", "Name of the Modelfile")
 	createCmd.Flags().StringP("quantize", "q", "", "Quantize model to this level (e.g. q4_0)")
 
 	showCmd := &cobra.Command{
-		Use:     "show MODEL",
-		Short:   "Show information for a model",
-		Args:    cobra.ExactArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    ShowHandler,
+		Use:         "show MODEL",
+		Short:       "Show information for a model",
+		Args:        cobra.ExactArgs(1),
+		PreRunE:     checkServerHeartbeat,
+		RunE:        ShowHandler,
+		Annotations: envconfig.Describe("OLLAMA_HOST"),
 	}
 
 	showCmd.Flags().Bool("license", false, "Show license of a model")
@@ -1242,11 +1229,12 @@ func NewCLI() *cobra.Command {
 	showCmd.Flags().Bool("system", false, "Show system message of a model")
 
 	runCmd := &cobra.Command{
-		Use:     "run MODEL [PROMPT]",
-		Short:   "Run a model",
-		Args:    cobra.MinimumNArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    RunHandler,
+		Use:         "run MODEL [PROMPT]",
+		Short:       "Run a model",
+		Args:        cobra.MinimumNArgs(1),
+		PreRunE:     checkServerHeartbeat,
+		RunE:        RunHandler,
+		Annotations: envconfig.Describe("OLLAMA_HOST", "OLLAMA_NOHISTORY"),
 	}
 
 	runCmd.Flags().String("keepalive", "", "Duration to keep a model loaded (e.g. 5m)")
@@ -1260,97 +1248,78 @@ func NewCLI() *cobra.Command {
 		Short:   "Start ollama",
 		Args:    cobra.ExactArgs(0),
 		RunE:    RunServer,
+		Annotations: envconfig.Describe(
+			"OLLAMA_HOST",
+			"OLLAMA_ORIGINS",
+			"OLLAMA_DEBUG",
+			"OLLAMA_KEEP_ALIVE",
+			"OLLAMA_MAX_LOADED_MODELS",
+			"OLLAMA_MAX_QUEUE",
+			"OLLAMA_MODELS",
+			"OLLAMA_NUM_PARALLEL",
+			"OLLAMA_NOPRUNE",
+			"OLLAMA_TMPDIR",
+			"OLLAMA_FLASH_ATTENTION",
+			"OLLAMA_LLM_LIBRARY",
+			"OLLAMA_MAX_VRAM",
+		),
 	}
 
 	pullCmd := &cobra.Command{
-		Use:     "pull MODEL",
-		Short:   "Pull a model from a registry",
-		Args:    cobra.ExactArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    PullHandler,
+		Use:         "pull MODEL",
+		Short:       "Pull a model from a registry",
+		Args:        cobra.ExactArgs(1),
+		PreRunE:     checkServerHeartbeat,
+		RunE:        PullHandler,
+		Annotations: envconfig.Describe("OLLAMA_HOST"),
 	}
 
 	pullCmd.Flags().Bool("insecure", false, "Use an insecure registry")
 
 	pushCmd := &cobra.Command{
-		Use:     "push MODEL",
-		Short:   "Push a model to a registry",
-		Args:    cobra.ExactArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    PushHandler,
+		Use:         "push MODEL",
+		Short:       "Push a model to a registry",
+		Args:        cobra.ExactArgs(1),
+		PreRunE:     checkServerHeartbeat,
+		RunE:        PushHandler,
+		Annotations: envconfig.Describe("OLLAMA_HOST"),
 	}
 
 	pushCmd.Flags().Bool("insecure", false, "Use an insecure registry")
 
 	listCmd := &cobra.Command{
-		Use:     "list",
-		Aliases: []string{"ls"},
-		Short:   "List models",
-		PreRunE: checkServerHeartbeat,
-		RunE:    ListHandler,
+		Use:         "list",
+		Aliases:     []string{"ls"},
+		Short:       "List models",
+		PreRunE:     checkServerHeartbeat,
+		RunE:        ListHandler,
+		Annotations: envconfig.Describe("OLLAMA_HOST"),
 	}
 
 	psCmd := &cobra.Command{
-		Use:     "ps",
-		Short:   "List running models",
-		PreRunE: checkServerHeartbeat,
-		RunE:    ListRunningHandler,
+		Use:         "ps",
+		Short:       "List running models",
+		PreRunE:     checkServerHeartbeat,
+		RunE:        ListRunningHandler,
+		Annotations: envconfig.Describe("OLLAMA_HOST"),
 	}
 
 	copyCmd := &cobra.Command{
-		Use:     "cp SOURCE DESTINATION",
-		Short:   "Copy a model",
-		Args:    cobra.ExactArgs(2),
-		PreRunE: checkServerHeartbeat,
-		RunE:    CopyHandler,
+		Use:         "cp SOURCE DESTINATION",
+		Short:       "Copy a model",
+		Args:        cobra.ExactArgs(2),
+		PreRunE:     checkServerHeartbeat,
+		RunE:        CopyHandler,
+		Annotations: envconfig.Describe("OLLAMA_HOST"),
 	}
 
 	deleteCmd := &cobra.Command{
-		Use:     "rm MODEL [MODEL...]",
-		Short:   "Remove a model",
-		Args:    cobra.MinimumNArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    DeleteHandler,
-	}
-
-	envVars := envconfig.AsMap()
-
-	envs := []envconfig.EnvVar{envVars["OLLAMA_HOST"]}
-
-	for _, cmd := range []*cobra.Command{
-		createCmd,
-		showCmd,
-		runCmd,
-		pullCmd,
-		pushCmd,
-		listCmd,
-		psCmd,
-		copyCmd,
-		deleteCmd,
-		serveCmd,
-	} {
-		switch cmd {
-		case runCmd:
-			appendEnvDocs(cmd, []envconfig.EnvVar{envVars["OLLAMA_HOST"], envVars["OLLAMA_NOHISTORY"]})
-		case serveCmd:
-			appendEnvDocs(cmd, []envconfig.EnvVar{
-				envVars["OLLAMA_DEBUG"],
-				envVars["OLLAMA_HOST"],
-				envVars["OLLAMA_KEEP_ALIVE"],
-				envVars["OLLAMA_MAX_LOADED_MODELS"],
-				envVars["OLLAMA_MAX_QUEUE"],
-				envVars["OLLAMA_MODELS"],
-				envVars["OLLAMA_NUM_PARALLEL"],
-				envVars["OLLAMA_NOPRUNE"],
-				envVars["OLLAMA_ORIGINS"],
-				envVars["OLLAMA_TMPDIR"],
-				envVars["OLLAMA_FLASH_ATTENTION"],
-				envVars["OLLAMA_LLM_LIBRARY"],
-				envVars["OLLAMA_MAX_VRAM"],
-			})
-		default:
-			appendEnvDocs(cmd, envs)
-		}
+		Use:         "rm MODEL [MODEL...]",
+		Short:       "Remove a model",
+		Args:        cobra.MinimumNArgs(1),
+		PreRunE:     checkServerHeartbeat,
+		RunE:        DeleteHandler,
+		Annotations: envconfig.Describe("OLLAMA_HOST"),
 	}
 
 	rootCmd.AddCommand(
@@ -1366,5 +1335,98 @@ func NewCLI() *cobra.Command {
 		deleteCmd,
 	)
 
+	rootCmd.SetUsageTemplate(usageTemplate())
+
 	return rootCmd
+}
+
+func usageTemplate() string {
+	return `Usage:
+{{- if .Runnable }} {{ .UseLine }}
+{{- end }}
+{{- if .HasAvailableSubCommands }} {{ .CommandPath }} [command]
+{{- end }}
+
+{{- if gt (len .Aliases) 0}}
+
+Aliases:
+  {{ .NameAndAliases }}
+{{- end }}
+
+{{- if .HasExample }}
+
+Examples:
+{{ .Example }}
+{{- end }}
+
+{{- if .HasAvailableSubCommands }}
+{{- if eq (len .Groups) 0}}
+
+Available Commands:
+{{- range .Commands }}
+{{- if or .IsAvailableCommand (eq .Name "help") }}
+  {{ rpad .Name .NamePadding }} {{ .Short }}
+{{- end }}
+{{- end }}
+
+{{- else }}
+
+{{- range .Groups }}
+
+{{ .Title }}
+
+{{- range $.Commands }}
+{{- if and (eq .GroupID .ID) (or .IsAvailableCommand (eq .Name "help")) }}
+  {{ rpad .Name .NamePadding }} {{ .Short }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- if not .AllChildCommandsHaveGroup }}
+
+Additional Commands:
+{{- range $.Commands }}
+{{- if and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")) }}
+  {{ rpad .Name .NamePadding }} {{ .Short }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- if .HasAvailableLocalFlags }}
+
+Flags:
+{{ .LocalFlags.FlagUsages | trimTrailingWhitespaces }}
+{{- end }}
+
+{{- if .HasAvailableInheritedFlags }}
+
+Global Flags:
+{{ .InheritedFlags.FlagUsages | trimTrailingWhitespaces }}
+{{- end }}
+
+{{- if .Annotations }}
+
+Environment Variables:
+{{- range $key, $value := .Annotations }}
+  {{ rpad $key 24 }} {{ $value }}
+{{- end }}
+{{- end }}
+
+{{- if .HasHelpSubCommands }}
+
+Additional help topics:
+{{- range .Commands }}
+{{- if .IsAdditionalHelpTopicCommand }}
+  {{ rpad .CommandPath .CommandPathPadding }} {{ .Short }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- if .HasAvailableSubCommands }}
+
+Use "{{ .CommandPath }} [command] --help" for more information about a command.
+{{- end }}
+`
 }

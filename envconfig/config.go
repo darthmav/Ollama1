@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -235,48 +236,61 @@ var (
 	MaxVRAM = Uint("OLLAMA_MAX_VRAM", 0)
 )
 
-type EnvVar struct {
-	Name        string
-	Value       any
-	Description string
+
+type envVar struct {
+	Name  string
+	Desc  string
+	Value any
 }
 
-func AsMap() map[string]EnvVar {
-	ret := map[string]EnvVar{
-		"OLLAMA_DEBUG":             {"OLLAMA_DEBUG", Debug(), "Show additional debug information (e.g. OLLAMA_DEBUG=1)"},
-		"OLLAMA_FLASH_ATTENTION":   {"OLLAMA_FLASH_ATTENTION", FlashAttention(), "Enabled flash attention"},
-		"OLLAMA_HOST":              {"OLLAMA_HOST", Host(), "IP Address for the ollama server (default 127.0.0.1:11434)"},
-		"OLLAMA_KEEP_ALIVE":        {"OLLAMA_KEEP_ALIVE", KeepAlive(), "The duration that models stay loaded in memory (default \"5m\")"},
-		"OLLAMA_LLM_LIBRARY":       {"OLLAMA_LLM_LIBRARY", LLMLibrary(), "Set LLM library to bypass autodetection"},
-		"OLLAMA_MAX_LOADED_MODELS": {"OLLAMA_MAX_LOADED_MODELS", MaxRunners(), "Maximum number of loaded models per GPU"},
-		"OLLAMA_MAX_QUEUE":         {"OLLAMA_MAX_QUEUE", MaxQueue(), "Maximum number of queued requests"},
-		"OLLAMA_MAX_VRAM":          {"OLLAMA_MAX_VRAM", MaxVRAM, "Maximum VRAM"},
-		"OLLAMA_MODELS":            {"OLLAMA_MODELS", Models(), "The path to the models directory"},
-		"OLLAMA_NOHISTORY":         {"OLLAMA_NOHISTORY", NoHistory(), "Do not preserve readline history"},
-		"OLLAMA_NOPRUNE":           {"OLLAMA_NOPRUNE", NoPrune(), "Do not prune model blobs on startup"},
-		"OLLAMA_NUM_PARALLEL":      {"OLLAMA_NUM_PARALLEL", NumParallel(), "Maximum number of parallel requests"},
-		"OLLAMA_ORIGINS":           {"OLLAMA_ORIGINS", Origins(), "A comma separated list of allowed origins"},
-		"OLLAMA_RUNNERS_DIR":       {"OLLAMA_RUNNERS_DIR", RunnersDir(), "Location for runners"},
-		"OLLAMA_SCHED_SPREAD":      {"OLLAMA_SCHED_SPREAD", SchedSpread(), "Always schedule model across all GPUs"},
-		"OLLAMA_TMPDIR":            {"OLLAMA_TMPDIR", TmpDir(), "Location for temporary files"},
-	}
-	if runtime.GOOS != "darwin" {
-		ret["CUDA_VISIBLE_DEVICES"] = EnvVar{"CUDA_VISIBLE_DEVICES", CudaVisibleDevices(), "Set which NVIDIA devices are visible"}
-		ret["HIP_VISIBLE_DEVICES"] = EnvVar{"HIP_VISIBLE_DEVICES", HipVisibleDevices(), "Set which AMD devices are visible"}
-		ret["ROCR_VISIBLE_DEVICES"] = EnvVar{"ROCR_VISIBLE_DEVICES", RocrVisibleDevices(), "Set which AMD devices are visible"}
-		ret["GPU_DEVICE_ORDINAL"] = EnvVar{"GPU_DEVICE_ORDINAL", GpuDeviceOrdinal(), "Set which AMD devices are visible"}
-		ret["HSA_OVERRIDE_GFX_VERSION"] = EnvVar{"HSA_OVERRIDE_GFX_VERSION", HsaOverrideGfxVersion(), "Override the gfx used for all detected AMD GPUs"}
-		ret["OLLAMA_INTEL_GPU"] = EnvVar{"OLLAMA_INTEL_GPU", IntelGPU(), "Enable experimental Intel GPU detection"}
-	}
-	return ret
+func (e envVar) String() string {
+	return fmt.Sprintf("%s:%v", e.Name, e.Value)
 }
 
-func Values() map[string]string {
-	vals := make(map[string]string)
-	for k, v := range AsMap() {
-		vals[k] = fmt.Sprintf("%v", v.Value)
+func Vars() []envVar {
+	s := []envVar{
+		{"OLLAMA_DEBUG", "Show additional debug information (e.g. OLLAMA_DEBUG=1)", Debug()},
+		{"OLLAMA_FLASH_ATTENTION", "Enabled flash attention", FlashAttention()},
+		{"OLLAMA_HOST", "IP Address for the ollama server (default 127.0.0.1:11434)", Host()},
+		{"OLLAMA_KEEP_ALIVE", `The duration that models stay loaded in memory (default "5m")`, KeepAlive()},
+		{"OLLAMA_LLM_LIBRARY", "Set LLM library to bypass autodetection", LLMLibrary()},
+		{"OLLAMA_MAX_LOADED_MODELS", "Maximum number of loaded models per GPU", MaxRunners()},
+		{"OLLAMA_MAX_QUEUE", "Maximum number of queued requests", MaxQueue()},
+		{"OLLAMA_MAX_VRAM", "Maximum VRAM", MaxVRAM()},
+		{"OLLAMA_MODELS", "The path to the models directory", Models()},
+		{"OLLAMA_NOHISTORY", "Do not preserve readline history", NoHistory()},
+		{"OLLAMA_NOPRUNE", "Do not prune model blobs on startup", NoPrune()},
+		{"OLLAMA_NUM_PARALLEL", "Maximum number of parallel requests", NumParallel()},
+		{"OLLAMA_ORIGINS", "A comma separated list of allowed origins", Origins()},
+		{"OLLAMA_RUNNERS_DIR", "Location for runners", RunnersDir()},
+		{"OLLAMA_SCHED_SPREAD", "Always schedule model across all GPUs", SchedSpread()},
+		{"OLLAMA_TMPDIR", "Location for temporary files", TmpDir()},
 	}
-	return vals
+
+	if runtime.GOOS == "windows" {
+		s = append(s,
+			envVar{"CUDA_VISIBLE_DEVICES", "Set which NVIDIA devices are visible", CudaVisibleDevices()},
+			envVar{"HIP_VISIBLE_DEVICES", "Set which AMD devices are visible", HipVisibleDevices()},
+			envVar{"ROCR_VISIBLE_DEVICES", "Set which AMD devices are visible", RocrVisibleDevices()},
+			envVar{"GPU_DEVICE_ORDINAL", "Set which AMD devices are visible", GpuDeviceOrdinal()},
+			envVar{"HSA_OVERRIDE_GFX_VERSION", "Override the gfx used for all detected AMD GPUs", HsaOverrideGfxVersion()},
+			envVar{"OLLAMA_INTEL_GPU", "Enable experimental Intel GPU detection", IntelGPU()},
+		)
+	}
+
+	return s
+}
+
+func Describe(s ...string) map[string]string {
+	m := make(map[string]string)
+	vars := Vars()
+	for _, k := range s {
+		if i := slices.IndexFunc(vars, func(e envVar) bool { return e.Name == k }); i != -1 {
+			m[k] = vars[i].Desc
+		}
+	}
+
+	return m
 }
 
 // Var returns an environment variable stripped of leading and trailing quotes or spaces
