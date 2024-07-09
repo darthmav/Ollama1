@@ -27,6 +27,11 @@ chat_completion = client.chat.completions.create(
     ],
     model='llama3',
 )
+
+completion = client.completions.create(
+    model="llama3",
+    prompt="Say this is a test"
+)
 ```
 
 ### OpenAI JavaScript library
@@ -44,6 +49,11 @@ const openai = new OpenAI({
 const chatCompletion = await openai.chat.completions.create({
   messages: [{ role: 'user', content: 'Say this is a test' }],
   model: 'llama3',
+})
+
+const completion = await openai.completions.create({
+    model: "llama3",
+    prompt: "Say this is a test.",
 })
 ```
 
@@ -66,6 +76,12 @@ curl http://localhost:11434/v1/chat/completions \
         ]
     }'
 
+curl http://localhost:11434/v1/completions \
+    -H "Content-Type: application/json" \
+    -d '{
+        "model": "llama3",
+        "prompt": "Say this is a test"
+    }'
 ```
 
 ## Endpoints
@@ -103,9 +119,38 @@ curl http://localhost:11434/v1/chat/completions \
 - [ ] `user`
 - [ ] `n`
 
+### `/v1/completions`
+
+#### Supported features
+
+- [x] Completions
+- [x] Streaming
+- [x] JSON mode
+- [x] Reproducible outputs
+- [ ] Logprobs
+
+#### Supported request fields
+
+- [x] `model`
+- [x] `prompt`
+- [x] `frequency_penalty`
+- [x] `presence_penalty`
+- [x] `seed`
+- [x] `stop`
+- [x] `stream`
+- [x] `temperature`
+- [x] `top_p`
+- [x] `max_tokens`
+- [ ] `best_of`
+- [ ] `echo`
+- [ ] `suffix`
+- [ ] `logit_bias`
+- [ ] `user`
+- [ ] `n`
+
 #### Notes
 
-- `usage.prompt_tokens` will be 0 for completions where prompt evaluation is cached
+- `prompt` currently only accepts a string
 
 ## Models
 
