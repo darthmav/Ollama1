@@ -64,6 +64,7 @@ func TestConvertFull(t *testing.T) {
 		"gemma-2b-it",
 		"Phi-3-mini-128k-instruct",
 		"all-MiniLM-L6-v2",
+		"gemma-2-9b-it",
 	}
 
 	for i := range cases {
