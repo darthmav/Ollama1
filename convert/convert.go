@@ -90,6 +90,8 @@ func Convert(path string, ws io.WriteSeeker) error {
 		conv = &mixtral{}
 	case "GemmaForCausalLM":
 		conv = &gemma{}
+	case "Phi3ForCausalLM":
+		conv = &phi3{}
 	default:
 		return errors.New("unsupported architecture")
 	}
