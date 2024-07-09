@@ -63,6 +63,10 @@ type Converter interface {
 	writeFile(io.WriteSeeker, llm.KV, []*llm.Tensor) error
 }
 
+type moreParser interface {
+	parseMore(string) error
+}
+
 // Convert writes an Ollama compatible model to the provided io.WriteSeeker based on configurations
 // and files it finds in the input path.
 // Supported input model formats include safetensors.
@@ -92,12 +96,20 @@ func Convert(path string, ws io.WriteSeeker) error {
 		conv = &gemma{}
 	case "Phi3ForCausalLM":
 		conv = &phi3{}
+	case "BertModel":
+		conv = &bert{}
 	default:
 		return errors.New("unsupported architecture")
 	}
 
 	if err := json.Unmarshal(bts, conv); err != nil {
 		return err
+	}
+
+	if t, ok := conv.(moreParser); ok {
+		if err := t.parseMore(path); err != nil {
+			return err
+		}
 	}
 
 	t, err := parseTokenizer(path, conv.specialTokenTypes())
