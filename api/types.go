@@ -254,6 +254,7 @@ type CopyRequest struct {
 type PullRequest struct {
 	Model    string `json:"model"`
 	Insecure bool   `json:"insecure,omitempty"`
+	HTTP     bool   `json:"http,omitempty"`
 	Username string `json:"username"`
 	Password string `json:"password"`
 	Stream   *bool  `json:"stream,omitempty"`
@@ -275,6 +276,7 @@ type ProgressResponse struct {
 type PushRequest struct {
 	Model    string `json:"model"`
 	Insecure bool   `json:"insecure,omitempty"`
+	HTTP     bool   `json:"http,omitempty"`
 	Username string `json:"username"`
 	Password string `json:"password"`
 	Stream   *bool  `json:"stream,omitempty"`

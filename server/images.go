@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -42,6 +43,7 @@ const CapabilityCompletion = Capability("completion")
 
 type registryOptions struct {
 	Insecure bool
+	HTTP     bool
 	Username string
 	Password string
 	Token    string
@@ -806,8 +808,8 @@ func PushModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 	mp := ParseModelPath(name)
 	fn(api.ProgressResponse{Status: "retrieving manifest"})
 
-	if mp.ProtocolScheme == "http" && !regOpts.Insecure {
-		return fmt.Errorf("insecure protocol http")
+	if regOpts.HTTP {
+		mp.ProtocolScheme = "http"
 	}
 
 	manifest, _, err := GetManifest(mp)
@@ -873,8 +875,8 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 		}
 	}
 
-	if mp.ProtocolScheme == "http" && !regOpts.Insecure {
-		return fmt.Errorf("insecure protocol http")
+	if regOpts.HTTP {
+		mp.ProtocolScheme = "http"
 	}
 
 	fn(api.ProgressResponse{Status: "pulling manifest"})
@@ -1075,9 +1077,16 @@ func makeRequestWithRetry(ctx context.Context, method string, requestURL *url.UR
 }
 
 func makeRequest(ctx context.Context, method string, requestURL *url.URL, headers http.Header, body io.Reader, regOpts *registryOptions) (*http.Response, error) {
-	if requestURL.Scheme != "http" && regOpts != nil && regOpts.Insecure {
+	tr := http.DefaultTransport
+	if regOpts != nil && regOpts.Insecure {
+		tr = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	}
+	if regOpts.HTTP {
 		requestURL.Scheme = "http"
 	}
+	client := &http.Client{Transport: tr}
 
 	req, err := http.NewRequestWithContext(ctx, method, requestURL.String(), body)
 	if err != nil {
@@ -1107,7 +1116,7 @@ func makeRequest(ctx context.Context, method string, requestURL *url.URL, header
 		req.ContentLength = contentLength
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
