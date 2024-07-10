@@ -3,11 +3,13 @@ package openai
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,7 +30,7 @@ type ErrorResponse struct {
 
 type Message struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
 }
 
 type Choice struct {
@@ -269,10 +271,52 @@ func toModel(r api.ShowResponse, m string) Model {
 	}
 }
 
-func fromChatRequest(r ChatCompletionRequest) api.ChatRequest {
+func fromChatRequest(r ChatCompletionRequest) (api.ChatRequest, error) {
 	var messages []api.Message
 	for _, msg := range r.Messages {
-		messages = append(messages, api.Message{Role: msg.Role, Content: msg.Content})
+		switch content := msg.Content.(type) {
+		case string:
+			messages = append(messages, api.Message{Role: msg.Role, Content: content})
+		case []any:
+			message := api.Message{Role: msg.Role}
+			for _, c := range content {
+				data, ok := c.(map[string]any)
+				if !ok {
+					return api.ChatRequest{}, fmt.Errorf("invalid message format")
+				}
+				switch data["type"] {
+				case "text":
+					text, ok := data["text"].(string)
+					if !ok {
+						return api.ChatRequest{}, fmt.Errorf("invalid message format")
+					}
+					message.Content = text
+				case "image_url":
+					urlMap, ok := data["image_url"].(map[string]any)
+					if !ok {
+						return api.ChatRequest{}, fmt.Errorf("invalid message format")
+					}
+					url, ok := urlMap["url"].(string)
+					if !ok {
+						return api.ChatRequest{}, fmt.Errorf("invalid message format")
+					}
+					types := []string{"jpeg", "jpg", "png"}
+					for _, t := range types {
+						url = strings.TrimPrefix(url, "data:image/"+t+";base64,")
+					}
+					img, err := base64.StdEncoding.DecodeString(url)
+					if err != nil {
+						return api.ChatRequest{}, fmt.Errorf("invalid message format")
+					}
+					message.Images = append(message.Images, img)
+				default:
+					return api.ChatRequest{}, fmt.Errorf("invalid message format")
+				}
+			}
+			messages = append(messages, message)
+		default:
+			return api.ChatRequest{}, fmt.Errorf("invalid message content type: %T", content)
+		}
 	}
 
 	options := make(map[string]interface{})
@@ -329,7 +373,7 @@ func fromChatRequest(r ChatCompletionRequest) api.ChatRequest {
 		Format:   format,
 		Options:  options,
 		Stream:   &r.Stream,
-	}
+	}, nil
 }
 
 func fromCompleteRequest(r CompletionRequest) (api.GenerateRequest, error) {
@@ -656,7 +700,13 @@ func ChatMiddleware() gin.HandlerFunc {
 		}
 
 		var b bytes.Buffer
-		if err := json.NewEncoder(&b).Encode(fromChatRequest(req)); err != nil {
+
+		chatReq, err := fromChatRequest(req)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, NewError(http.StatusBadRequest, err.Error()))
+		}
+
+		if err := json.NewEncoder(&b).Encode(chatReq); err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, NewError(http.StatusInternalServerError, err.Error()))
 			return
 		}
