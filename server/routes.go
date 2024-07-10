@@ -890,7 +890,7 @@ func (s *Server) GenerateRoutes() http.Handler {
 	for _, prop := range openAIProperties {
 		config.AllowHeaders = append(config.AllowHeaders, "x-stainless-"+prop)
 	}
-	config.AllowOrigins = envconfig.AllowOrigins
+	config.AllowOrigins = envconfig.Origins()
 
 	r := gin.Default()
 	r.Use(
@@ -933,7 +933,7 @@ func (s *Server) GenerateRoutes() http.Handler {
 
 func Serve(ln net.Listener) error {
 	level := slog.LevelInfo
-	if envconfig.Debug {
+	if envconfig.Debug() {
 		level = slog.LevelDebug
 	}
 
@@ -961,7 +961,7 @@ func Serve(ln net.Listener) error {
 		return err
 	}
 
-	if !envconfig.NoPrune {
+	if !envconfig.NoPrune() {
 		// clean up unused layers and manifests
 		if err := PruneLayers(); err != nil {
 			return err

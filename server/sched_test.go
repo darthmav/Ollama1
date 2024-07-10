@@ -12,7 +12,6 @@ import (
 
 	"github.com/ollama/ollama/api"
 	"github.com/ollama/ollama/app/lifecycle"
-	"github.com/ollama/ollama/envconfig"
 	"github.com/ollama/ollama/format"
 	"github.com/ollama/ollama/gpu"
 	"github.com/ollama/ollama/llm"
@@ -240,7 +239,7 @@ func TestRequests(t *testing.T) {
 		t.Fatal("timeout")
 	}
 
-	envconfig.MaxRunners = 1
+	t.Setenv("OLLAMA_MAX_LOADED_MODELS", "1")
 	s.newServerFn = scenario3a.newServer
 	slog.Info("scenario3a")
 	s.pendingReqCh <- scenario3a.req
@@ -261,7 +260,7 @@ func TestRequests(t *testing.T) {
 	require.Len(t, s.loaded, 1)
 	s.loadedMu.Unlock()
 
-	envconfig.MaxRunners = 0
+	t.Setenv("OLLAMA_MAX_LOADED_MODELS", "0")
 	s.newServerFn = scenario3b.newServer
 	slog.Info("scenario3b")
 	s.pendingReqCh <- scenario3b.req
@@ -335,7 +334,8 @@ func TestGetRunner(t *testing.T) {
 	scenario1b.req.sessionDuration = &api.Duration{Duration: 0}
 	scenario1c := newScenario(t, ctx, "ollama-model-1c", 10)
 	scenario1c.req.sessionDuration = &api.Duration{Duration: 0}
-	envconfig.MaxQueuedRequests = 1
+
+	t.Setenv("OLLAMA_MAX_QUEUE", "1")
 	s := InitScheduler(ctx)
 	s.getGpuFn = func() gpu.GpuInfoList {
 		g := gpu.GpuInfo{Library: "metal"}

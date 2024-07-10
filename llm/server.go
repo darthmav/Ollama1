@@ -151,7 +151,7 @@ func NewLlamaServer(gpus gpu.GpuInfoList, model string, ggml *GGML, adapters, pr
 	} else {
 		servers = serversForGpu(gpus[0]) // All GPUs in the list are matching Library and Variant
 	}
-	demandLib := envconfig.LLMLibrary
+	demandLib := envconfig.LLMLibrary()
 	if demandLib != "" {
 		serverPath := availableServers[demandLib]
 		if serverPath == "" {
@@ -183,7 +183,7 @@ func NewLlamaServer(gpus gpu.GpuInfoList, model string, ggml *GGML, adapters, pr
 		params = append(params, "--n-gpu-layers", fmt.Sprintf("%d", opts.NumGPU))
 	}
 
-	if envconfig.Debug {
+	if envconfig.Debug() {
 		params = append(params, "--verbose")
 	}
 
@@ -209,7 +209,7 @@ func NewLlamaServer(gpus gpu.GpuInfoList, model string, ggml *GGML, adapters, pr
 		params = append(params, "--memory-f32")
 	}
 
-	flashAttnEnabled := envconfig.FlashAttention
+	flashAttnEnabled := envconfig.FlashAttention()
 
 	for _, g := range gpus {
 		// only cuda (compute capability 7+) and metal support flash attention
@@ -373,7 +373,7 @@ func NewLlamaServer(gpus gpu.GpuInfoList, model string, ggml *GGML, adapters, pr
 		}
 
 		slog.Info("starting llama server", "cmd", s.cmd.String())
-		if envconfig.Debug {
+		if envconfig.Debug() {
 			filteredEnv := []string{}
 			for _, ev := range s.cmd.Env {
 				if strings.HasPrefix(ev, "CUDA_") ||
