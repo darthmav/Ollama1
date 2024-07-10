@@ -99,6 +99,17 @@ configure_systemd() {
     status "Adding current user to ollama group..."
     $SUDO usermod -a -G ollama $(whoami)
 
+    if test -f "/etc/ollama_serve.conf" ; then
+        status "Skip creating ollama serve config file..."
+    else
+        status "Creating ollama serve config file..."
+        cat <<EOF | $SUDO tee /etc/ollama_serve.conf >/dev/null
+# The list of supported env variables https://github.com/ollama/ollama/blob/main/envconfig/config.go
+#OLLAMA_DEBUG=1
+#OLLAMA_HOST=0.0.0.0:11434
+EOF
+    fi
+
     status "Creating ollama systemd service..."
     cat <<EOF | $SUDO tee /etc/systemd/system/ollama.service >/dev/null
 [Unit]
@@ -112,6 +123,7 @@ Group=ollama
 Restart=always
 RestartSec=3
 Environment="PATH=$PATH"
+EnvironmentFile=/etc/ollama_serve.conf
 
 [Install]
 WantedBy=default.target
