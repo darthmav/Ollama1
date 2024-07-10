@@ -1,0 +1,104 @@
+#@@@@@@@@@@@@@@#
+# MUSA Builder #
+#@@@@@@@@@@@@@@#
+FROM --platform=linux/amd64 sh-harbor.mthreads.com/haive/ubuntu:20.04 AS musa-builder-amd64
+
+# build-essential libelf-dev libnuma-dev libopenmpi-dev -> for musa toolkits
+# curl git ccache -> for building ollama/llama.cpp
+# ripgrep python-is-python3 pip -> for musify-text
+
+# Install dependencies
+RUN apt update -y && apt install -y build-essential libelf-dev libnuma-dev libopenmpi-dev \
+    curl git ccache \
+    ripgrep python-is-python3 pip && \
+    apt clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# Install cmake and go
+ARG GOLANG_VERSION=1.22.1
+ARG CMAKE_VERSION=3.22.1
+ARG GO_ARCH="amd64"
+RUN curl -s -L https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-$(uname -m).tar.gz | tar -zx -C /usr --strip-components 1
+
+RUN mkdir -p /usr/local
+RUN curl -s -L https://dl.google.com/go/go${GOLANG_VERSION}.linux-${GO_ARCH}.tar.gz | tar xz -C /usr/local
+RUN ln -s /usr/local/go/bin/go /usr/local/bin/go
+RUN ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+RUN go env -w GOPROXY=https://goproxy.cn,direct
+
+# Install musa toolkits
+ENV DOWNLOAD_PREFIX=https://oss.mthreads.com/product-release/release-kuae-1.2.0/External
+RUN wget --no-check-certificate ${DOWNLOAD_PREFIX}/ddk_x86-mtgpu_linux-xorg-release-pdump_off.deb -O ddk.deb
+RUN wget --no-check-certificate ${DOWNLOAD_PREFIX}/musa_toolkits_install_full.tar.gz -O musa.tar.gz
+RUN mkdir -p /ddk && dpkg -x ddk.deb /ddk
+RUN tar -xvf musa.tar.gz && ./musa_toolkits_install/install.sh
+RUN printf "/ddk/usr/lib/x86_64-linux-gnu/musa\n/usr/local/musa/lib" > /etc/ld.so.conf.d/000-musa.conf && \
+    ldconfig && rm -rf /workspace/*
+ENV PATH=/usr/local/musa/bin:/usr/local/musa/tools:${PATH}
+ENV LD_LIBRARY_PATH=/usr/local/musa/lib:${LD_LIBRARY_PATH}
+
+# Install dependencies for musify-text
+RUN pip config set global.index-url https://pypi.mirrors.ustc.edu.cn/simple/
+RUN pip install ahocorapy pyahocorasick==1.*
+
+################################################################
+# Copy the minimal context we need to run the generate scripts #
+################################################################
+FROM scratch AS llm-code
+COPY .git .git
+COPY .gitmodules .gitmodules
+COPY llm llm
+
+##########################################################
+# Intermediate stage used for building llama.cpp on MUSA #
+##########################################################
+FROM --platform=linux/amd64 musa-builder-amd64 AS musa-build-amd64
+COPY --from=llm-code / /go/src/github.com/ollama/ollama/
+WORKDIR /go/src/github.com/ollama/ollama/llm/generate
+ARG CGO_CFLAGS
+RUN OLLAMA_SKIP_STATIC_GENERATE=1 OLLAMA_SKIP_CPU_GENERATE=1 bash gen_linux.sh
+
+#########################################################
+# Intermediate stage used for building llama.cpp on CPU #
+#########################################################
+FROM --platform=linux/amd64 musa-builder-amd64 AS cpu-builder-amd64
+COPY --from=llm-code / /go/src/github.com/ollama/ollama/
+ARG OLLAMA_CUSTOM_CPU_DEFS
+ARG CGO_CFLAGS
+WORKDIR /go/src/github.com/ollama/ollama/llm/generate
+
+FROM --platform=linux/amd64 cpu-builder-amd64 AS static-build-amd64
+RUN OLLAMA_CPU_TARGET="static" bash gen_linux.sh
+FROM --platform=linux/amd64 cpu-builder-amd64 AS cpu-build-amd64
+RUN OLLAMA_SKIP_STATIC_GENERATE=1 OLLAMA_CPU_TARGET="cpu" bash gen_linux.sh
+
+########################################################
+# Intermediate stage used for ./scripts/build_linux.sh #
+########################################################
+FROM --platform=linux/amd64 cpu-build-amd64 AS build-amd64
+ENV CGO_ENABLED 1
+WORKDIR /go/src/github.com/ollama/ollama
+COPY . .
+COPY --from=static-build-amd64 /go/src/github.com/ollama/ollama/llm/build/linux/ llm/build/linux/
+COPY --from=musa-build-amd64 /go/src/github.com/ollama/ollama/llm/build/linux/ llm/build/linux/
+ARG GOFLAGS
+ARG CGO_CFLAGS
+RUN go build -trimpath .
+
+##################
+# Runtime stages #
+##################
+FROM --platform=linux/amd64 sh-harbor.mthreads.com/haive/ubuntu:20.04 as runtime-amd64
+RUN apt-get update && apt-get install -y ca-certificates libelf1 libnuma1 && apt clean && rm -rf /var/lib/apt/lists/*
+COPY --from=build-amd64 /go/src/github.com/ollama/ollama/ollama /bin/ollama
+
+FROM runtime-$TARGETARCH
+EXPOSE 11434
+ENV OLLAMA_HOST 0.0.0.0
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV MTHREADS_DRIVER_CAPABILITIES=compute,utility
+ENV MTHREADS_VISIBLE_DEVICES=all
+
+ENTRYPOINT ["/bin/ollama"]
+CMD ["serve"]

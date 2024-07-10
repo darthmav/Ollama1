@@ -1,5 +1,5 @@
 diff --git a/src/llama.cpp b/src/llama.cpp
-index 2b9ace28..172640e2 100644
+index 844755c6..b0d14efd 100644
 --- a/src/llama.cpp
 +++ b/src/llama.cpp
 @@ -5357,16 +5357,7 @@ static void llm_load_vocab(

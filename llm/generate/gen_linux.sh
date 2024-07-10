@@ -50,6 +50,13 @@ if [ -z "${CUDACXX}" ]; then
         # Try the default location in case it exists
         export CUDACXX=$(command -v nvcc)
     fi
+
+    if [ -x /usr/local/musa/bin/mcc ]; then
+        export CUDACXX=/usr/local/musa/bin/mcc
+    else
+        # Try the default location in case it exists
+        export CUDACXX=$(command -v mcc)
+    fi
 fi
 COMMON_CMAKE_DEFS="-DBUILD_SHARED_LIBS=off -DCMAKE_POSITION_INDEPENDENT_CODE=on -DGGML_NATIVE=off -DGGML_AVX=on -DGGML_AVX2=off -DGGML_AVX512=off -DGGML_FMA=off -DGGML_F16C=off -DGGML_OPENMP=off"
 source $(dirname $0)/gen_common.sh
@@ -156,10 +163,18 @@ if [ -z "${CUDART_LIB_DIR}" ]; then
     CUDART_LIB_DIR="${CUDA_LIB_DIR}"
 fi
 
+# If needed, look for the default MUSA toolkit location
+if [ -z "${CUDA_LIB_DIR}" ] && [ -d /usr/local/musa/lib ]; then
+    CUDA_LIB_DIR=/usr/local/musa/lib
+fi
+
 if [ -z "${OLLAMA_SKIP_CUDA_GENERATE}" -a -d "${CUDA_LIB_DIR}" ]; then
     echo "CUDA libraries detected - building dynamic CUDA library"
     init_vars
     CUDA_MAJOR=$(ls "${CUDA_LIB_DIR}"/libcudart.so.* | head -1 | cut -f3 -d. || true)
+    if [[ "${CUDACXX}" == *mcc ]]; then
+        CUDA_MAJOR=$(ls "${CUDA_LIB_DIR}"/libmusart.so.* | head -1 | cut -f3 -d. || true)
+    fi
     if [ -n "${CUDA_MAJOR}" ]; then
         CUDA_VARIANT=_v${CUDA_MAJOR}
     fi
@@ -176,13 +191,22 @@ if [ -z "${OLLAMA_SKIP_CUDA_GENERATE}" -a -d "${CUDA_LIB_DIR}" ]; then
     if [ -n "${OLLAMA_CUSTOM_CUDA_DEFS}" ]; then
         echo "OLLAMA_CUSTOM_CUDA_DEFS=\"${OLLAMA_CUSTOM_CUDA_DEFS}\""
         CMAKE_CUDA_DEFS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES} ${OLLAMA_CUSTOM_CUDA_DEFS}"
+        if [[ "${CUDACXX}" == *mcc ]]; then
+            CMAKE_CUDA_DEFS="-DGGML_MUSA=on -DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES} ${OLLAMA_CUSTOM_CUDA_DEFS}"
+        fi
         echo "Building custom CUDA GPU"
     else
         CMAKE_CUDA_DEFS="-DGGML_CUDA=on -DCMAKE_CUDA_FLAGS=-t8 -DGGML_CUDA_FORCE_MMQ=on -DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES} -DCMAKE_LIBRARY_PATH=/usr/local/cuda/compat"
+        if [[ "${CUDACXX}" == *mcc ]]; then
+            CMAKE_CUDA_DEFS="-DGGML_MUSA=on -DCMAKE_CUDA_FLAGS=-t8 -DGGML_CUDA_FORCE_MMQ=on -DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES} -DCMAKE_LIBRARY_PATH=/usr/local/cuda/compat"
+        fi
     fi
     CMAKE_DEFS="${COMMON_CMAKE_DEFS} ${CMAKE_DEFS} ${ARM64_DEFS} ${CMAKE_CUDA_DEFS}"
     BUILD_DIR="../build/linux/${ARCH}/cuda${CUDA_VARIANT}"
     EXTRA_LIBS="-L${CUDA_LIB_DIR} -lcudart -lcublas -lcublasLt -lcuda"
+    if [[ "${CUDACXX}" == *mcc ]]; then
+        EXTRA_LIBS="-L${CUDA_LIB_DIR} -lmusart -lmublas -lmusa"
+    fi
     build
 
     # Carry the CUDA libs as payloads to help reduce dependency burden on users
@@ -190,7 +214,11 @@ if [ -z "${OLLAMA_SKIP_CUDA_GENERATE}" -a -d "${CUDA_LIB_DIR}" ]; then
     # TODO - in the future we may shift to packaging these separately and conditionally
     #        downloading them in the install script.
     DEPS="$(ldd ${BUILD_DIR}/bin/ollama_llama_server )"
-    for lib in libcudart.so libcublas.so libcublasLt.so ; do
+    LIBS=("libcudart.so" "libcublas.so" "libcublasLt.so")
+    if [[ "${CUDACXX}" == *mcc ]]; then
+        LIBS=("libmusa.so" "libmusart.so" "libmublas.so")
+    fi
+    for lib in "${LIBS[@]}"; do
         DEP=$(echo "${DEPS}" | grep ${lib} | cut -f1 -d' ' | xargs || true)
         if [ -n "${DEP}" -a -e "${CUDA_LIB_DIR}/${DEP}" ]; then
             cp "${CUDA_LIB_DIR}/${DEP}" "${BUILD_DIR}/bin/"
