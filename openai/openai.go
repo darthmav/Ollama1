@@ -104,6 +104,7 @@ type CompletionRequest struct {
 	Stream           bool     `json:"stream"`
 	Temperature      *float32 `json:"temperature"`
 	TopP             float32  `json:"top_p"`
+	Suffix           string   `json:"suffix"`
 }
 
 type Completion struct {
@@ -169,7 +170,6 @@ func toChatCompletion(id string, r api.ChatResponse) ChatCompletion {
 			}(r.DoneReason),
 		}},
 		Usage: Usage{
-			// TODO: ollama returns 0 for prompt eval if the prompt was cached, but openai returns the actual count
 			PromptTokens:     r.PromptEvalCount,
 			CompletionTokens: r.EvalCount,
 			TotalTokens:      r.PromptEvalCount + r.EvalCount,
@@ -215,7 +215,6 @@ func toCompletion(id string, r api.GenerateResponse) Completion {
 			}(r.DoneReason),
 		}},
 		Usage: Usage{
-			// TODO: ollama returns 0 for prompt eval if the prompt was cached, but openai returns the actual count
 			PromptTokens:     r.PromptEvalCount,
 			CompletionTokens: r.EvalCount,
 			TotalTokens:      r.PromptEvalCount + r.EvalCount,
@@ -379,6 +378,7 @@ func fromCompleteRequest(r CompletionRequest) (api.GenerateRequest, error) {
 		Prompt:  r.Prompt,
 		Options: options,
 		Stream:  &r.Stream,
+		Suffix:  r.Suffix,
 	}, nil
 }
 
