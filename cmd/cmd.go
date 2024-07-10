@@ -80,6 +80,7 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 	status := "transferring model data"
 	spinner := progress.NewSpinner(status)
 	p.Add(status, spinner)
+	defer p.Stop()
 
 	for i := range modelfile.Commands {
 		switch modelfile.Commands[i].Name {
@@ -114,11 +115,11 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 				path = tempfile
 			}
 
-			digest, err := createBlob(cmd, client, path)
+			// spinner.Stop()
+			digest, err := createBlob(cmd, client, path, spinner)
 			if err != nil {
 				return err
 			}
-
 			modelfile.Commands[i].Args = "@" + digest
 		}
 	}
@@ -140,7 +141,7 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 			spinner.Stop()
 
 			status = resp.Status
-			spinner = progress.NewSpinner(status)
+			spinner := progress.NewSpinner(status)
 			p.Add(status, spinner)
 		}
 
@@ -267,12 +268,19 @@ func tempZipFiles(path string) (string, error) {
 
 var ErrBlobExists = errors.New("blob exists")
 
-func createBlob(cmd *cobra.Command, client *api.Client, path string) (string, error) {
+func createBlob(cmd *cobra.Command, client *api.Client, path string, spinner *progress.Spinner) (string, error) {
 	bin, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
 	defer bin.Close()
+
+	// Get file info to retrieve the size
+	fileInfo, err := bin.Stat()
+	if err != nil {
+		return "", err
+	}
+	fileSize := fileInfo.Size()
 
 	hash := sha256.New()
 	if _, err := io.Copy(hash, bin); err != nil {
@@ -282,6 +290,33 @@ func createBlob(cmd *cobra.Command, client *api.Client, path string) (string, er
 	if _, err := bin.Seek(0, io.SeekStart); err != nil {
 		return "", err
 	}
+
+	var pw progressWriter
+	// Create a progress bar and start a goroutine to update it
+	// JK Let's use a percentage
+
+	//bar := progress.NewBar("transferring model data...", fileSize, 0)
+	//p.Add("transferring model data", bar)
+
+	status := "transferring model data 0%"
+	spinner.SetMessage(status)
+
+	ticker := time.NewTicker(60 * time.Millisecond)
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				spinner.SetMessage(fmt.Sprintf("transferring model data %d%%", int(100*pw.n/fileSize)))
+			case <-done:
+				spinner.SetMessage("transferring model data 100%")
+				return
+			}
+		}
+	}()
 
 	digest := fmt.Sprintf("sha256:%x", hash.Sum(nil))
 
@@ -312,10 +347,19 @@ func createBlob(cmd *cobra.Command, client *api.Client, path string) (string, er
 	}
 
 	// If at any point copying the blob over locally fails, we default to the copy through the server
-	if err = client.CreateBlob(cmd.Context(), digest, bin); err != nil {
+	if err = client.CreateBlob(cmd.Context(), digest, io.TeeReader(bin, &pw)); err != nil {
 		return "", err
 	}
 	return digest, nil
+}
+
+type progressWriter struct {
+	n int64
+}
+
+func (w *progressWriter) Write(p []byte) (n int, err error) {
+	w.n += int64(len(p))
+	return len(p), nil
 }
 
 func getLocalPath(ctx context.Context, digest string) (string, error) {
