@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -272,6 +273,54 @@ func Test_Routes(t *testing.T) {
 				assert.Equal(t, "library", retrieveResp.OwnedBy)
 			},
 		},
+		{
+			Name:   "Embed Handler Empty Input",
+			Method: http.MethodPost,
+			Path:   "/api/embed",
+			Setup: func(t *testing.T, req *http.Request) {
+				embedReq := api.EmbedRequest{
+					Model: "t-bone",
+					Input: "",
+				}
+				jsonData, err := json.Marshal(embedReq)
+				require.NoError(t, err)
+				req.Body = io.NopCloser(bytes.NewReader(jsonData))
+			},
+			Expected: func(t *testing.T, resp *http.Response) {
+				contentType := resp.Header.Get("Content-Type")
+				assert.Equal(t, "application/json; charset=utf-8", contentType)
+				body, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+
+				var embedResp api.EmbedResponse
+				err = json.Unmarshal(body, &embedResp)
+				require.NoError(t, err)
+
+				assert.Equal(t, "t-bone", embedResp.Model)
+				assert.Nil(t, embedResp.Embeddings)
+			},
+		},
+		{
+			Name:   "Embed Handler Invalid Input",
+			Method: http.MethodPost,
+			Path:   "/api/embed",
+			Setup: func(t *testing.T, req *http.Request) {
+				embedReq := api.EmbedRequest{
+					Model: "t-bone",
+					Input: 2,
+				}
+				jsonData, err := json.Marshal(embedReq)
+				require.NoError(t, err)
+				req.Body = io.NopCloser(bytes.NewReader(jsonData))
+			},
+			Expected: func(t *testing.T, resp *http.Response) {
+				contentType := resp.Header.Get("Content-Type")
+				assert.Equal(t, "application/json; charset=utf-8", contentType)
+				_, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				assert.Equal(t, 400, resp.StatusCode)
+			},
+		},
 	}
 
 	t.Setenv("OLLAMA_MODELS", t.TempDir())
@@ -418,5 +467,40 @@ func TestShow(t *testing.T) {
 
 	if resp.ProjectorInfo["general.architecture"] != "clip" {
 		t.Fatal("Expected projector architecture to be 'clip', but got", resp.ProjectorInfo["general.architecture"])
+	}
+}
+
+func TestNormalize(t *testing.T) {
+	type testCase struct {
+		input []float32
+	}
+
+	testCases := []testCase{
+		{input: []float32{1}},
+		{input: []float32{0, 1, 2, 3}},
+		{input: []float32{0.1, 0.2, 0.3}},
+		{input: []float32{-0.1, 0.2, 0.3, -0.4}},
+		{input: []float32{0, 0, 0}},
+	}
+
+	assertNorm := func(vec []float32) (res bool) {
+		sum := 0.0
+		for _, v := range vec {
+			sum += float64(v * v)
+		}
+		if math.Abs(sum-1) > 1e-6 {
+			return sum == 0
+		} else {
+			return true
+		}
+	}
+
+	for _, tc := range testCases {
+		t.Run("", func(t *testing.T) {
+			normalized := normalize(tc.input)
+			if !assertNorm(normalized) {
+				t.Errorf("Vector %v is not normalized", tc.input)
+			}
+		})
 	}
 }

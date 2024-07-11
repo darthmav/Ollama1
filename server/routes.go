@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/netip"
@@ -246,6 +248,149 @@ func (s *Server) GenerateHandler(c *gin.Context) {
 	streamResponse(c, ch)
 }
 
+func (s *Server) EmbedHandler(c *gin.Context) {
+	var req api.EmbedRequest
+	err := c.ShouldBindJSON(&req)
+	switch {
+	case errors.Is(err, io.EOF):
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing request body"})
+		return
+	case err != nil:
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.Model == "" {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "model is required"})
+		return
+	}
+
+	if req.Truncate == nil {
+		truncate := true
+		req.Truncate = &truncate
+	}
+
+	model, err := GetModel(req.Model)
+	if err != nil {
+		var pErr *fs.PathError
+		if errors.As(err, &pErr) {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("model '%s' not found, try pulling it first", req.Model)})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	opts, err := modelOptions(model, req.Options)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	reqEmbed := []string{}
+
+	switch embeddings := req.Input.(type) {
+	case string:
+		if embeddings == "" {
+			c.JSON(http.StatusOK, api.EmbedResponse{Model: req.Model, Embeddings: [][]float32{}})
+			return
+		}
+		reqEmbed = []string{embeddings}
+	case []any:
+		if len(embeddings) == 0 {
+			c.JSON(http.StatusOK, api.EmbedResponse{Model: req.Model, Embeddings: [][]float32{}})
+			return
+		}
+
+		for _, v := range embeddings {
+			if _, ok := v.(string); !ok {
+				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid input type"})
+				return
+			}
+			reqEmbed = append(reqEmbed, v.(string))
+		}
+	default:
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid input type"})
+		return
+	}
+
+	r, _, _, err := s.scheduleRunner(c.Request.Context(), req.Model, []Capability{}, req.Options, req.KeepAlive)
+	if err != nil {
+		handleScheduleError(c, req.Model, err)
+		return
+	}
+
+	kvData, err := getKVData(model.ModelPath, false)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	checkFit := func(s string, truncate bool) (string, error) {
+		tokens, err := r.Tokenize(c.Request.Context(), s)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return "", err
+		}
+
+		ctxLen := min(opts.NumCtx, int(kvData.ContextLength()))
+		if len(tokens) > ctxLen {
+			if truncate {
+				tokens = tokens[:ctxLen]
+				return r.Detokenize(c.Request.Context(), tokens)
+			} else {
+				return "", fmt.Errorf("input length exceeds maximum context length")
+			}
+		}
+
+		return s, nil
+	}
+
+	reqEmbedArray := make([]string, len(reqEmbed))
+	for i, v := range reqEmbed {
+		s, err := checkFit(v, *req.Truncate)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		reqEmbedArray[i] = s
+	}
+	embeddings, err := r.Embed(c.Request.Context(), reqEmbedArray)
+
+	if err != nil {
+		slog.Info(fmt.Sprintf("embedding generation failed: %v", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate embedding"})
+		return
+	}
+
+	for i, e := range embeddings {
+		embeddings[i] = normalize(e)
+	}
+
+	resp := api.EmbedResponse{
+		Model:      req.Model,
+		Embeddings: embeddings,
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func normalize(vec []float32) []float32 {
+	var sum float32
+	for _, v := range vec {
+		sum += v * v
+	}
+
+	norm := float32(0.0)
+	if sum > 0 {
+		norm = float32(1.0 / math.Sqrt(float64(sum)))
+	}
+
+	for i := range vec {
+		vec[i] *= norm
+	}
+	return vec
+}
+
 func (s *Server) EmbeddingsHandler(c *gin.Context) {
 	var req api.EmbeddingRequest
 	if err := c.ShouldBindJSON(&req); errors.Is(err, io.EOF) {
@@ -268,14 +413,24 @@ func (s *Server) EmbeddingsHandler(c *gin.Context) {
 		return
 	}
 
-	embedding, err := r.Embedding(c.Request.Context(), req.Prompt)
+	embedding, err := r.Embed(c.Request.Context(), []string{req.Prompt})
+
 	if err != nil {
 		slog.Info(fmt.Sprintf("embedding generation failed: %v", err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate embedding"})
 		return
 	}
 
-	c.JSON(http.StatusOK, api.EmbeddingResponse{Embedding: embedding})
+	embedding64 := make([]float64, len(embedding[0]))
+
+	for i, v := range embedding[0] {
+		embedding64[i] = float64(v)
+	}
+
+	resp := api.EmbeddingResponse{
+		Embedding: embedding64,
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func (s *Server) PullModelHandler(c *gin.Context) {
@@ -901,7 +1056,8 @@ func (s *Server) GenerateRoutes() http.Handler {
 	r.POST("/api/pull", s.PullModelHandler)
 	r.POST("/api/generate", s.GenerateHandler)
 	r.POST("/api/chat", s.ChatHandler)
-	r.POST("/api/embeddings", s.EmbeddingsHandler)
+	r.POST("/api/embed", s.EmbedHandler)
+	r.POST("/api/embeddings", s.EmbeddingsHandler) // legacy
 	r.POST("/api/create", s.CreateModelHandler)
 	r.POST("/api/push", s.PushModelHandler)
 	r.POST("/api/copy", s.CopyModelHandler)
